@@ -37,8 +37,8 @@ def _ncoord_all_pair(
     if cutoff is not None and cutoff_smoothing == "poly":
         damp *= poly_smoothing(r, cutoff)
     if cutoff is not None:
-        damp = torch.where(r <= cutoff, damp, torch.zeros_like(damp))
-    damp = torch.where(r >= 1e-8, damp, torch.zeros_like(damp))  # remove self-edge
+        damp = torch.where(r <= cutoff, damp, torch.tensor(0.0))
+    damp = torch.where(r >= 1e-8, damp, torch.tensor(0.0))  # remove self-edge
 
     return torch.sum(damp, axis=[1, 2])
 
@@ -87,17 +87,17 @@ def edisp(  # calculate edisp by all-pair computation
             table_slice = table[i:j]
             cond = torch.logical_and(i <= idx, idx < j)
             idx_sliced = idx - i
-            idx_sliced = torch.maximum(torch.zeros_like(idx_sliced), idx_sliced)
-            idx_sliced = torch.minimum(torch.ones_like(idx_sliced) * (time_slice_size - 1), idx_sliced)
+            idx_sliced = torch.maximum(torch.tensor(0), idx_sliced)
+            idx_sliced = torch.minimum(torch.tensor(time_slice_size - 1), idx_sliced)
             result_sliced = table_slice[idx_sliced]
-            result += torch.where(cond[:, None], result_sliced, torch.zeros_like(result_sliced))
+            result += torch.where(cond[:, None], result_sliced, torch.tensor(0.0))
         return result
     cn0 = sliced_gather(c6ab_0, Z_pair).view(n_atoms, n_atoms, 5*5)
     cn1 = sliced_gather(c6ab_1, Z_pair).view(n_atoms, n_atoms, 5*5)
     cn2 = sliced_gather(c6ab_2, Z_pair).view(n_atoms, n_atoms, 5*5)
 
     r_cn = (cn1 - nc[:, None, None]) ** 2 + (cn2 - nc[None, :, None]) ** 2  # (n_atoms, n_atoms, 5*5)
-    k3_rnc = torch.where(cn0 > 0.0, k3 * r_cn, -1.0e20 * torch.ones_like(r_cn))
+    k3_rnc = torch.where(cn0 > 0.0, k3 * r_cn, torch.tensor(-1.0e20))
     r_ratio = torch.softmax(k3_rnc, dim=-1)
 
     c6 = (r_ratio * cn0).sum(dim=-1)  # (n_atoms, n_atoms)
@@ -157,7 +157,7 @@ def edisp(  # calculate edisp by all-pair computation
     if cutoff is not None and cutoff_smoothing == "poly":
         e68 *= poly_smoothing(r, cutoff)
 
-    e68 = torch.where(r <= cutoff, e68, torch.zeros_like(e68))
-    e68 = torch.where(r >= 1e-8, e68, torch.zeros_like(e68))  # remove self-edge
+    e68 = torch.where(r <= cutoff, e68, torch.tensor(0.0))
+    e68 = torch.where(r >= 1e-8, e68, torch.tensor(0.0))  # remove self-edge
 
     return torch.sum(e68.to(torch.float64).sum())
