@@ -80,8 +80,7 @@ def edisp(  # calculate edisp by all-pair computation
     Z_pair = (Z[:, None] * 95 + Z[None, :]).view(n_atoms * n_atoms)
 
     def sliced_gather(table, idx, time_slice_size=3072):
-        result_shape = (idx.shape[0], *tuple(table.shape[1:]))
-        result = torch.zeros(result_shape)
+        result = torch.tensor(0.0)
         for i in range(0, table.shape[0], time_slice_size):
             j = i + time_slice_size
             table_slice = table[i:j]
@@ -90,7 +89,7 @@ def edisp(  # calculate edisp by all-pair computation
             idx_sliced = torch.maximum(torch.tensor(0), idx_sliced)
             idx_sliced = torch.minimum(torch.tensor(time_slice_size - 1), idx_sliced)
             result_sliced = table_slice[idx_sliced]
-            result += torch.where(cond[:, None], result_sliced, torch.tensor(0.0))
+            result = result + torch.where(cond[:, None], result_sliced, torch.tensor(0.0))
         return result
     cn0 = sliced_gather(c6ab_0, Z_pair).view(n_atoms, n_atoms, 5*5)
     cn1 = sliced_gather(c6ab_1, Z_pair).view(n_atoms, n_atoms, 5*5)
