@@ -78,9 +78,11 @@ def edisp(  # calculate edisp by all-pair computation
     def energy(v, idx_i, idx_j):
         n_pair = idx_i.shape[0]
         Z_pair = Z[idx_i] * 95 + Z[idx_j]
-        cn = c6ab.view(95*95, 5*5*3)[Z_pair].view(n_pair, 5*5, 3)
-        cn0, cn1, cn2 = torch.unbind(cn, dim=-1)
-        r_cn = (cn1 - nc[idx_i, None]) ** 2 + (cn2 - nc[idx_j, None]) ** 2
+
+        cn0 = c6ab[:, :, :, :, 0].view(95*95, 5*5)[Z_pair]
+        cn1 = c6ab[:, :, :, 0, 1].view(95*95, 5)[Z_pair]
+        cn2 = c6ab[:, :, 0, :, 2].view(95*95, 5)[Z_pair]
+        r_cn = ((cn1[:, :, None] - nc[idx_i, None, None]) ** 2 + (cn2[:, None, :] - nc[idx_j, None, None]) ** 2).view(n_pair, 5*5)
         k3_rnc = torch.where(cn0 > 0.0, k3 * r_cn, torch.tensor(-1.0e20))
         r_ratio = torch.softmax(k3_rnc, dim=-1)
         c6 = (r_ratio * cn0).sum(dim=-1)
