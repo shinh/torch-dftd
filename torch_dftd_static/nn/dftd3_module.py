@@ -7,7 +7,8 @@ import torch
 from ase.units import Bohr
 from torch import Tensor
 from torch_dftd.functions.dftd3 import d3_autoev
-from torch_dftd_static.functions.dftd3 import edisp
+from torch_dftd_static.functions.dftd3 import edisp as edisp_notriu
+from torch_dftd_static.functions.dftd3_triu import edisp as edisp_triu
 
 class DFTD3ModuleStatic(torch.nn.Module):
     """DFTD3ModuleStatic
@@ -26,7 +27,7 @@ class DFTD3ModuleStatic(torch.nn.Module):
         params: Dict[str, float],
         cutoff: float = 95.0 * Bohr,
         cnthr: float = 40.0 * Bohr,
-        abc: bool=False,
+        abc: bool = False,
         dtype=torch.float32,
         cutoff_smoothing: str = "none",
     ):
@@ -67,11 +68,13 @@ class DFTD3ModuleStatic(torch.nn.Module):
         shift_vecs: Tensor,
         cell_volume: float,
         damping: str = "zero",
+        triu: bool = False,
     ) -> Tensor:
         """Forward computation to calculate atomic wise dispersion energy"""
         
         # TODO: add interface for force and stress
         
+        edisp = edisp_triu if triu else edisp_notriu
         E_disp = d3_autoev * edisp(
             Z,
             pos = pos / Bohr,

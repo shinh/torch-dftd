@@ -28,7 +28,7 @@ def cell_width(cell):
 
     return np.array([cell_dx, cell_dy, cell_dz])
 
-def calc_shift_vecs(cell, pbc, cutoff):
+def calc_shift_vecs(cell, pbc, cutoff, triu=False):
     w = cell_width(cell)
     n_shifts = np.ceil(cutoff / w)
     n_shifts = np.where(pbc, n_shifts, 0)
@@ -38,7 +38,11 @@ def calc_shift_vecs(cell, pbc, cutoff):
                 np.arange(-n_shifts[1], n_shifts[1] + 1),
                 np.arange(-n_shifts[2], n_shifts[2] + 1),
                 indexing="ij")
-    mat = np.array([x.flatten(), y.flatten(), z.flatten()]).T
+    x, y, z = x.flatten(), y.flatten(), z.flatten()
+    if triu:
+        cond = (x > 0) | ((x == 0) & (y > 0)) | ((x == 0) & (y == 0) & (z > 0))
+        x, y, z = x[cond], y[cond], z[cond]
+    mat = np.array([x, y, z]).T
     return mat.dot(cell)
 
 class ExportONNX(torch.nn.Module):
@@ -64,13 +68,14 @@ class ExportONNX(torch.nn.Module):
         )
         self.damping = damping
 
-    def forward(self, Z, pos, shift_vecs, cell_volume):
+    def forward(self, Z, pos, shift_vecs, cell_volume, triu):
         r = self.dftd_module.calc_energy(
             Z,
             pos,
             shift_vecs,
             cell_volume,
             damping=self.damping,
+            triu=triu
         )
         return r[0]["energy"]
 
@@ -96,6 +101,7 @@ def prepare_data(args):
 if __name__ == "__main__":
     args = parse_args()
     out_dir = args.out_dir
+    triu = True
     cutoff = 40.0 * Bohr
 
     atoms = prepare_data(args)
@@ -109,7 +115,7 @@ if __name__ == "__main__":
         cell = np.eye(3)
     cell_volume = np.abs(np.linalg.det(cell))
 
-    shift_vecs = calc_shift_vecs(cell, pbc, cutoff=cutoff)
+    shift_vecs = calc_shift_vecs(cell, pbc, cutoff=cutoff, triu=triu)
     shift_vecs = torch.tensor(shift_vecs)
 
     print("n_atoms = ", len(Z), "n_cell = ", len(shift_vecs), file=sys.stderr)
@@ -120,6 +126,7 @@ if __name__ == "__main__":
         "pos": pos.type(torch.float32),
         "shift_vecs": shift_vecs.type(torch.float32),
         "cell_volume": cell_volume,
+        "triu": triu,
     }
 
     exporter = ExportONNX(cutoff=cutoff, damping="bj")

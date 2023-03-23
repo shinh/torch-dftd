@@ -91,9 +91,11 @@ def edisp(  # calculate edisp by all-pair computation
             result_sliced = table_slice[idx_sliced]
             result = result + torch.where(cond[:, None], result_sliced, torch.tensor(0.0))
         return result
-    cn0 = sliced_gather(c6ab_0, Z_pair).view(n_atoms, n_atoms, 5*5)
-    cn1 = sliced_gather(c6ab_1, Z_pair).view(n_atoms, n_atoms, 5*5)
-    cn2 = sliced_gather(c6ab_2, Z_pair).view(n_atoms, n_atoms, 5*5)
+    #cn0 = sliced_gather(c6ab_0, Z_pair).view(n_atoms, n_atoms, 5*5)
+    #cn1 = sliced_gather(c6ab_1, Z_pair).view(n_atoms, n_atoms, 5*5)
+    #cn2 = sliced_gather(c6ab_2, Z_pair).view(n_atoms, n_atoms, 5*5)
+    cn = sliced_gather(c6ab.view(95*95, 5*5*3), Z_pair).view(n_atoms, n_atoms, 5*5, 3)
+    cn0, cn1, cn2 = torch.unbind(cn, dim=-1)
 
     r_cn = (cn1 - nc[:, None, None]) ** 2 + (cn2 - nc[None, :, None]) ** 2  # (n_atoms, n_atoms, 5*5)
     k3_rnc = torch.where(cn0 > 0.0, k3 * r_cn, torch.tensor(-1.0e20))
