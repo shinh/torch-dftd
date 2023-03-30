@@ -1,19 +1,17 @@
 import os
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 import numpy as np
 import torch
 from ase.units import Bohr
 from torch import Tensor
-from torch_dftd.functions.dftd3 import d3_autoang, d3_autoev, edisp
-from torch_dftd.functions.distance import calc_distances
-from torch_dftd.nn.base_dftd_module import BaseDFTDModule
+from torch_dftd.functions.dftd3 import d3_autoev
+from torch_dftd_static.functions.dftd3 import edisp as edisp_notriu
+from torch_dftd_static.functions.dftd3_triu import edisp as edisp_triu
 
-
-class DFTD3Module(BaseDFTDModule):
-    """DFTD3Module
-
+class DFTD3ModuleStatic(torch.nn.Module):
+    """DFTD3ModuleStatic
     Args:
         params (dict): xc-dependent parameters. alp, s6, rs6, s18, rs18.
         cutoff (float): cutoff distance in angstrom. Default value is 95bohr := 50 angstrom.
@@ -31,10 +29,12 @@ class DFTD3Module(BaseDFTDModule):
         cnthr: float = 40.0 * Bohr,
         abc: bool = False,
         dtype=torch.float32,
-        bidirectional: bool = False,
         cutoff_smoothing: str = "none",
     ):
-        super(DFTD3Module, self).__init__()
+        super(DFTD3ModuleStatic, self).__init__()
+
+        if abc:
+            raise ValueError("currently abc (3-body term) is not available in static version. ")
 
         # relative filepath to package folder
         d3_filepath = str(Path(os.path.abspath(__file__)).parent / "params" / "dftd3_params.npz")
@@ -43,11 +43,6 @@ class DFTD3Module(BaseDFTDModule):
         r0ab = torch.tensor(d3_params["r0ab"], dtype=dtype)
         rcov = torch.tensor(d3_params["rcov"], dtype=dtype)
         r2r4 = torch.tensor(d3_params["r2r4"], dtype=dtype)
-
-        # check c6ab parameter structure
-        assert torch.all((c6ab[:, :, :, :, 1] == c6ab[:, :, :, 0:1, 1]) | (c6ab[:, :, :, :, 0] < 0)), "c6ab(1) is not constant along row"
-        assert torch.all((c6ab[:, :, :, :, 2] == c6ab[:, :, 0:1, :, 2]) | (c6ab[:, :, :, :, 0] < 0)), "c6ab(2) is not constant along column"
-
         # (95, 95, 5, 5, 3) c0, c1, c2 for coordination number dependent c6ab term.
         self.register_buffer("c6ab", c6ab)
         self.register_buffer("r0ab", r0ab)  # atom pair distance (95, 95)
@@ -63,52 +58,35 @@ class DFTD3Module(BaseDFTDModule):
         self.params = params
         self.cutoff = cutoff
         self.cnthr = cnthr
-        self.abc = abc
         self.dtype = dtype
-        self.bidirectional = bidirectional
         self.cutoff_smoothing = cutoff_smoothing
 
-    def calc_energy_batch(
+    def calc_energy(
         self,
         Z: Tensor,
         pos: Tensor,
-        edge_index: Tensor,
-        cell: Optional[Tensor] = None,
-        pbc: Optional[Tensor] = None,
-        shift_pos: Optional[Tensor] = None,
-        batch: Optional[Tensor] = None,
-        batch_edge: Optional[Tensor] = None,
+        shift_vecs: Tensor,
+        cell_volume: float,
         damping: str = "zero",
+        triu: bool = False,
     ) -> Tensor:
         """Forward computation to calculate atomic wise dispersion energy"""
-        shift_pos = pos.new_zeros((edge_index.size()[1], 3, 3)) if shift_pos is None else shift_pos
-        pos_bohr = pos / d3_autoang  # angstrom -> bohr
-        if cell is None:
-            cell_bohr: Optional[Tensor] = None
-        else:
-            cell_bohr = cell / d3_autoang  # angstrom -> bohr
-        shift_bohr = shift_pos / d3_autoang  # angstrom -> bohr
-        r = calc_distances(pos_bohr, edge_index, cell_bohr, shift_bohr)
-        # E_disp (n_graphs,): Energy in eV unit
+        
+        # TODO: add interface for force and stress
+        
+        edisp = edisp_triu if triu else edisp_notriu
         E_disp = d3_autoev * edisp(
             Z,
-            r,
-            edge_index,
-            c6ab=self.c6ab,  # type:ignore
-            r0ab=self.r0ab,  # type:ignore
-            rcov=self.rcov,  # type:ignore
-            r2r4=self.r2r4,  # type:ignore
+            pos = pos / Bohr,
+            shift_vecs = shift_vecs / Bohr,
+            c6ab=self.c6ab,
+            r0ab=self.r0ab,
+            rcov=self.rcov,
+            r2r4=self.r2r4,
             params=self.params,
             cutoff=self.cutoff / Bohr,
             cnthr=self.cnthr / Bohr,
-            batch=batch,
-            batch_edge=batch_edge,
-            shift_pos=shift_bohr,
-            damping=damping,
             cutoff_smoothing=self.cutoff_smoothing,
-            bidirectional=self.bidirectional,
-            abc=self.abc,
-            pos=pos_bohr,
-            cell=cell_bohr,
+            damping=damping,
         )
-        return E_disp
+        return [{"energy": E_disp}]
