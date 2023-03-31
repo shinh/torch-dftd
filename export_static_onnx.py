@@ -134,4 +134,5 @@ if __name__ == "__main__":
     print("energy = ", float(exporter.forward(**args)), "eV")
 
     print("out_dir = ", out_dir, file=sys.stderr)
-    ppe_onnx.export_testcase(exporter, tuple(args.values()), out_dir, verbose=True)
+    ppe_onnx.export_testcase(exporter, tuple(args.values()), out_dir, verbose=True,
+                             input_names=["Z","pos","shift_vecs","cell_volume","triu"])
