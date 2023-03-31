@@ -7,14 +7,7 @@ from torch_dftd.functions.smoothing import poly_smoothing
 
 # conversion factors used in grimme d3 code
 
-d3_autoang = 0.52917726  # for converting distance from bohr to angstrom
-d3_autoev = 27.21138505  # for converting a.u. to eV
-
-d3_k1 = 16.000
-d3_k2 = 4 / 3
-d3_k3 = -4.000
-d3_maxc = 5  # maximum number of coordination complexes
-
+from torch_dftd.functions.dftd3 import d3_k1, d3_k3
 
 def _ncoord_all_pair(
     rco: Tensor,
