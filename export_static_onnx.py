@@ -138,7 +138,7 @@ if __name__ == "__main__":
     energy_orig = float(atoms.get_potential_energy())
     print("energy      = ", energy, "eV")
     print("energy_orig = ", energy_orig, "eV")
-    assert abs(energy - energy_orig) < 1e-7 * energy_orig
+    assert abs(energy - energy_orig) < 1e-7 * abs(energy_orig)
 
     print("out_dir = ", out_dir, file=sys.stderr)
     ppe_onnx.export_testcase(exporter, tuple(args.values()), out_dir, verbose=True)
