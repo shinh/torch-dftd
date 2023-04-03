@@ -13,6 +13,7 @@ pfvm.onnx.register_custom_operators()
 
 import pytorch_pfn_extras.onnx as ppe_onnx
 from torch_dftd_static.nn.dftd3_module import DFTD3ModuleStatic
+from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
 
 def cell_width(cell):
     xn = np.cross(cell[1, :], cell[2, :])
@@ -131,7 +132,13 @@ if __name__ == "__main__":
 
     exporter = ExportONNX(cutoff=cutoff, damping="bj")
 
-    print("energy = ", float(exporter.forward(**args)), "eV")
+    # compare energy with original implementation
+    energy = float(exporter.forward(**args))
+    calc_orig = TorchDFTD3Calculator(atoms=atoms, device="cpu", damping="bj", cutoff=cutoff)
+    energy_orig = float(atoms.get_potential_energy())
+    print("energy      = ", energy, "eV")
+    print("energy_orig = ", energy_orig, "eV")
+    assert abs(energy - energy_orig) < 1e-7 * energy_orig
 
     print("out_dir = ", out_dir, file=sys.stderr)
     ppe_onnx.export_testcase(exporter, tuple(args.values()), out_dir, verbose=True,
