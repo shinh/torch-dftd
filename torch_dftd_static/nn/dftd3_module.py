@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from ase.units import Bohr
 from torch import Tensor
-from torch_dftd.functions.dftd3 import d3_autoev
+from torch_dftd.functions.dftd3 import d3_autoang, d3_autoev
 from torch_dftd_static.functions.dftd3 import edisp as edisp_notriu
 from torch_dftd_static.functions.dftd3_triu import edisp as edisp_triu
 
@@ -77,8 +77,8 @@ class DFTD3ModuleStatic(torch.nn.Module):
         edisp = edisp_triu if triu else edisp_notriu
         E_disp = d3_autoev * edisp(
             Z,
-            pos = pos / Bohr,
-            shift_vecs = shift_vecs / Bohr,
+            pos = pos / d3_autoang,
+            shift_vecs = shift_vecs / d3_autoang,
             c6ab=self.c6ab,
             r0ab=self.r0ab,
             rcov=self.rcov,
