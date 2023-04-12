@@ -9,7 +9,8 @@ from torch import Tensor
 from torch_dftd.functions.dftd3 import d3_autoang, d3_autoev
 from torch_dftd_static.functions.dftd3 import edisp as edisp_notriu
 # from torch_dftd_static.functions.dftd3_triu import edisp as edisp_triu
-from torch_dftd_static.functions.dftd3_triu_2 import edisp as edisp_triu
+# from torch_dftd_static.functions.dftd3_triu_2 import edisp as edisp_triu
+from torch_dftd_static.functions.dftd3_triu_3 import edisp as edisp_triu
 
 class DFTD3ModuleStatic(torch.nn.Module):
     """DFTD3ModuleStatic
