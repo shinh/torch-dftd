@@ -47,27 +47,14 @@ def edisp(  # calculate edisp by all-pair computation
     nc = torch.sum(damp, axis=1) + torch.sum(damp, axis=0)  # (n_atoms,)
 
     # calculate c6 and c8
-    Z_pair = (Z[:, None] * 95 + Z[None, :]).view(n_atoms * n_atoms)
-    
-    cn0 = c6ab[:, :, :, :, 0].view(95*95, 5, 5)[Z_pair].view(n_atoms, n_atoms, 5, 5)
+    cn0 = c6ab[:, :, :, :, 0][Z, :][:, Z]
     cn1 = c6ab[Z, 1, :, 0, 1]  # (n_atoms, 5)
     cn2 = c6ab[1, Z, 0, :, 2]  # (n_atoms, 5)
     k3_rnc_1 = torch.where(cn1 >= 0.0, k3 * (nc[:, None] - cn1) ** 2, torch.tensor(-1.0e20))
     k3_rnc_2 = torch.where(cn2 >= 0.0, k3 * (nc[:, None] - cn2) ** 2, torch.tensor(-1.0e20))
-    r_ratio_1 = torch.softmax(k3_rnc_1, dim=-1)
-    r_ratio_2 = torch.softmax(k3_rnc_2, dim=-1)
-    print(cn0.shape,r_ratio_1.shape, r_ratio_2.shape)
+    r_ratio_1 = torch.softmax(k3_rnc_1, dim=-1).to(torch.float32)
+    r_ratio_2 = torch.softmax(k3_rnc_2, dim=-1).to(torch.float32)
     c6 = (cn0 * r_ratio_1[:, None, :, None] * r_ratio_2[None, :, None, :]).sum(dim=(-1,-2))
-
-    '''
-    cn0 = c6ab[:, :, :, :, 0].view(95*95, 5*5)[Z_pair].view(n_atoms, n_atoms, 5*5)
-    cn1 = c6ab[:, :, :, 0, 1].view(95*95, 5)[Z_pair].view(n_atoms, n_atoms, 5)
-    cn2 = c6ab[:, :, 0, :, 2].view(95*95, 5)[Z_pair].view(n_atoms, n_atoms, 5)
-    r_cn = ((cn1[:, :, :, None] - nc[:, None, None, None]) ** 2 + (cn2[:, :, None, :] - nc[None, :, None, None]) ** 2).view(n_atoms, n_atoms, 5*5)
-    k3_rnc = torch.where(cn0 > 0.0, k3 * r_cn, torch.tensor(-1.0e20))
-    r_ratio = torch.softmax(k3_rnc, dim=-1)
-    c6 = (r_ratio * cn0).sum(dim=-1)
-    '''
     c8 = 3 * c6 * r2r4[Z][:, None] * r2r4[Z][None, :]
     
     # calculate energy
