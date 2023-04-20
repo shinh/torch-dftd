@@ -131,7 +131,7 @@ if __name__ == "__main__":
         Z = torch.nn.functional.pad(Z, (0, n_pad), mode="constant")
         pos = torch.nn.functional.pad(pos, (0, 0, 0, n_pad), mode="constant")
     else:
-        atom_mask = None
+        atom_mask = torch.ones(len(Z), dtype=bool)
 
     if args.pad_num_cells is not None:
         shift_mask = torch.tensor(np.arange(args.pad_num_cells) < len(shift_vecs))
@@ -139,7 +139,7 @@ if __name__ == "__main__":
         assert n_pad >= 0
         shift_vecs = torch.nn.functional.pad(shift_vecs, (0, 0, 0, n_pad), mode="constant")
     else:
-        shift_mask = None
+        shift_mask = torch.ones(len(shift_vecs), dtype=bool)
 
     print("n_atoms = ", len(Z), "n_cell = ", len(shift_vecs), file=sys.stderr)
     print("atoms = ", atoms, file=sys.stderr)
