@@ -3,41 +3,16 @@ from typing import Dict, Optional
 
 import torch
 from torch import Tensor
-from torch_dftd.functions.distance import calc_distances
 from torch_dftd.functions.smoothing import poly_smoothing
-from torch_dftd.functions.triplets import calc_triplets
 
 # conversion factors used in grimme d3 code
+
 from torch_dftd.functions.dftd3 import d3_k1, d3_k3
-
-def _ncoord_all_pair(
-    rco: Tensor,
-    r: Tensor,
-    cutoff: Optional[float] = None,
-    k1: float = d3_k1,
-    cutoff_smoothing: str = "none",
-) -> Tensor:
-    """Compute coordination numbers by adding an inverse damping function
-    Args:
-        rco: (n_atoms, n_atoms)
-        r: (n_atoms, n_atoms, n_shift)
-        Returns:
-        g (Tensor): (n_atoms, ) coordination number for each atom
-    """
-    rr = rco[:, :, None] / r
-    damp = torch.sigmoid(k1 * (rr - 1.0))
-    if cutoff is not None and cutoff_smoothing == "poly":
-        damp *= poly_smoothing(r, cutoff)
-    if cutoff is not None:
-        damp = torch.where(r <= cutoff, damp, torch.tensor(0.0))
-    damp = torch.where(r >= 1e-8, damp, torch.tensor(0.0))  # remove self-edge
-
-    return torch.sum(damp, axis=[1, 2])
 
 def edisp(  # calculate edisp by all-pair computation
     Z: Tensor,
     pos: Tensor,  # (n_atoms, 3)
-    shift_vecs: Tensor,
+    shift_vecs: Tensor,  # half of shift vectors (all shift vecs = shift_vecs + -shift_vecs + [(0,0,0)])
     c6ab: Tensor,
     r0ab: Tensor,
     rcov: Tensor,
@@ -50,57 +25,43 @@ def edisp(  # calculate edisp by all-pair computation
     cutoff_smoothing: str = "none",
     damping: str = "zero",
 ):
-    diff = pos[None, :, :] - pos[:, None, :]  # (n_atoms, n_atoms, 3)
-    r2 = torch.sum((diff[:, :, None, :] + shift_vecs[None, None, :, :]) ** 2, axis=-1)  # (n_atoms, n_atoms, n_shift)
-    r = torch.sqrt(r2 + 1e-20)  # (n_atoms, n_atoms, n_shift)
-
-    rco = rcov[Z][:, None] + rcov[Z][None, :]  # (n_atoms, n_atoms)
-
-    nc = _ncoord_all_pair(
-        rco,
-        r,
-        cutoff=cnthr,
-        cutoff_smoothing=cutoff_smoothing,
-        k1=k1,
-    )  # coordination numbers (n_atoms,)
-
     n_atoms = len(Z)
+    triu_mask = (torch.arange(n_atoms)[:, None] < torch.arange(n_atoms)[None, :])[:, :, None] | ((torch.arange(1+len(shift_vecs)) > 0)[None, None, :])
+    shift_vecs_aug = torch.concat([torch.zeros(1, 3), shift_vecs], axis=0)
 
-    c6ab_0 = c6ab[:, :, :, :, 0].view(95*95, 5*5)
-    c6ab_1 = c6ab[:, :, :, :, 1].view(95*95, 5*5)
-    c6ab_2 = c6ab[:, :, :, :, 2].view(95*95, 5*5)
-    Z_pair = (Z[:, None] * 95 + Z[None, :]).view(n_atoms * n_atoms)
+    # calculate pairwise distances
+    shifted_pos = pos[:, None, :] + shift_vecs_aug[None, :, :]
+    r2 = torch.sum((pos[:, None, None, :] - shifted_pos[None, :, :, :]) ** 2, axis=-1)
+    r = torch.sqrt(r2 + 1e-20)
 
-    def sliced_gather(table, idx, time_slice_size=3072):
-        result = torch.tensor(0.0)
-        for i in range(0, table.shape[0], time_slice_size):
-            j = i + time_slice_size
-            table_slice = table[i:j]
-            cond = torch.logical_and(i <= idx, idx < j)
-            idx_sliced = idx - i
-            idx_sliced = torch.maximum(torch.tensor(0), idx_sliced)
-            idx_sliced = torch.minimum(torch.tensor(time_slice_size - 1), idx_sliced)
-            result_sliced = table_slice[idx_sliced]
-            result = result + torch.where(cond[:, None], result_sliced, torch.tensor(0.0))
-        return result
-    #cn0 = sliced_gather(c6ab_0, Z_pair).view(n_atoms, n_atoms, 5*5)
-    #cn1 = sliced_gather(c6ab_1, Z_pair).view(n_atoms, n_atoms, 5*5)
-    #cn2 = sliced_gather(c6ab_2, Z_pair).view(n_atoms, n_atoms, 5*5)
-    cn = sliced_gather(c6ab.view(95*95, 5*5*3), Z_pair).view(n_atoms, n_atoms, 5*5, 3)
-    cn0, cn1, cn2 = torch.unbind(cn, dim=-1)
+    # calculate coordination numbers (n_atoms,)
+    rco = rcov[Z][:, None] + rcov[Z][None, :]  # (n_atoms, n_atoms)
+    rr = rco[:, :, None] / r  # (n_atoms, n_atoms, 1+n_shift)
+    damp = torch.sigmoid(k1 * (rr - 1.0))  # (n_atoms, n_atoms, 1+n_shift)
+    if cnthr is not None and cutoff_smoothing == "poly":
+        damp *= poly_smoothing(r, cnthr)
+    if cnthr is not None:
+        damp = torch.where(r <= cnthr, damp, torch.tensor(0.0))
+    damp = torch.where(triu_mask, damp, torch.tensor(0.0))
+    damp = torch.sum(damp, axis=2)
+    nc = torch.sum(damp, axis=1) + torch.sum(damp, axis=0)  # (n_atoms,)
 
-    r_cn = (cn1 - nc[:, None, None]) ** 2 + (cn2 - nc[None, :, None]) ** 2  # (n_atoms, n_atoms, 5*5)
-    k3_rnc = torch.where(cn0 > 0.0, k3 * r_cn, torch.tensor(-1.0e20))
-    r_ratio = torch.softmax(k3_rnc, dim=-1)
-
-    c6 = (r_ratio * cn0).sum(dim=-1)  # (n_atoms, n_atoms)
-    c8 = 3 * c6 * r2r4[Z][:, None] * r2r4[Z][None, :]  # (n_atoms, n_atoms)
-
+    # calculate c6 and c8
+    cn0 = c6ab[:, :, :, :, 0][Z, :][:, Z]
+    cn1 = c6ab[Z, 1, :, 0, 1]  # (n_atoms, 5)
+    cn2 = c6ab[1, Z, 0, :, 2]  # (n_atoms, 5)
+    k3_rnc_1 = torch.where(cn1 >= 0.0, k3 * (nc[:, None] - cn1) ** 2, torch.tensor(-1.0e20))
+    k3_rnc_2 = torch.where(cn2 >= 0.0, k3 * (nc[:, None] - cn2) ** 2, torch.tensor(-1.0e20))
+    r_ratio_1 = torch.softmax(k3_rnc_1, dim=-1).to(torch.float32)
+    r_ratio_2 = torch.softmax(k3_rnc_2, dim=-1).to(torch.float32)
+    c6 = (cn0 * r_ratio_1[:, None, :, None] * r_ratio_2[None, :, None, :]).sum(dim=(-1,-2))
+    c8 = 3 * c6 * r2r4[Z][:, None] * r2r4[Z][None, :]
+    
+    # calculate energy
     s6 = params["s6"]
     s8 = params["s18"]
-
-    r6 = r2 ** 3  # (n_atoms, n_atoms, n_shift)
-    r8 = r6 * r2  # (n_atoms, n_atoms, n_shift)
+    r6 = r2 ** 3
+    r8 = r6 * r2
     if damping in ["bj", "bjm"]:
         a1 = params["rs6"]
         a2 = params["rs18"]
@@ -113,44 +74,24 @@ def edisp(  # calculate edisp by all-pair computation
         tmp8 = tmp6 * tmp2
         e6 = 1 / (r6 + tmp6[:, :, None])
         e8 = 1 / (r8 + tmp8[:, :, None])
-    elif damping == "zero":
-        rs6 = params["rs6"]
-        rs8 = params["rs18"]
-        alp = params["alp"]
-        alp6 = alp
-        alp8 = alp + 2.0
-        tmp2 = r0ab
-        rr = tmp2[:, :, None] / r
-        damp6 = 1.0 / (1.0 + 6.0 * (rs6 * rr) ** alp6)
-        damp8 = 1.0 / (1.0 + 6.0 * (rs8 * rr) ** alp8)
-        e6 = damp6 / r6
-        e8 = damp8 / r8
-    elif damping == "zerom":
-        rs6 = params["rs6"]
-        rs8 = params["rs18"]
-        alp = params["alp"]
-        alp6 = alp
-        alp8 = alp + 2.0
-        tmp2 = r0ab
-        r0_beta = rs8 * tmp2
-        rr = r / tmp2[:, :, None]
-        tmp = rr / rs6 + r0_beta
-        damp6 = 1.0 / (1.0 + 6.0 * tmp ** (-alp6))
-        tmp = rr + r0_beta
-        damp8 = 1.0 / (1.0 + 6.0 * tmp ** (-alp8))
-        e6 = damp6 / r6
-        e8 = damp8 / r8
     else:
         raise ValueError(f"[ERROR] Unexpected value damping={damping}")
 
-    e6 = -0.5 * s6 * c6[:, :, None] * e6  # (n_atoms, n_atoms, n_shift)
-    e8 = -0.5 * s8 * c8[:, :, None] * e8  # (n_atoms, n_atoms, n_shift)
+    e6 = -0.5 * s6 * c6[:, :, None] * e6
+    e8 = -0.5 * s8 * c8[:, :, None] * e8
     e68 = e6 + e8
 
     if cutoff is not None and cutoff_smoothing == "poly":
         e68 *= poly_smoothing(r, cutoff)
 
     e68 = torch.where(r <= cutoff, e68, torch.tensor(0.0))
-    e68 = torch.where(r >= 1e-8, e68, torch.tensor(0.0))  # remove self-edge
+    
+    e68 = torch.where(triu_mask, e68, torch.tensor(0.0))
+    return torch.sum(e68.to(torch.float64).sum()) * 2.0
 
-    return torch.sum(e68.to(torch.float64).sum())
+    #e68_same_cell = e68[:, :, 0]
+    #e68_same_cell = torch.where(torch.arange(n_atoms)[:, None] < torch.arange(n_atoms)[None, :], e68_same_cell, torch.tensor(0.0))
+    #e68_diff_cell = e68[:, :, 1:]
+    #e_same_cell = torch.sum(e68_same_cell.to(torch.float64).sum()) * 2.0
+    #e_diff_cell = torch.sum(e68_diff_cell.to(torch.float64).sum()) * 2.0
+    #return e_same_cell + e_diff_cell
