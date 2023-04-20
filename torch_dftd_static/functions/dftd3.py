@@ -27,15 +27,16 @@ def edisp(  # calculate edisp by all-pair computation
     atom_mask: Optional[Tensor] = None,
     shift_mask: Optional[Tensor] = None,
 ):
+    assert atom_mask is not None
+    assert shift_mask is not None
+
     n_atoms = len(Z)
     #assert torch.all(shift_vecs[0] == 0.0)
     #triu_mask = (torch.arange(n_atoms)[:, None] < torch.arange(n_atoms)[None, :])[:, :, None] | ((torch.arange(len(shift_vecs)) > 0)[None, None, :])
     triu_mask = (torch.arange(n_atoms)[:, None] < torch.arange(n_atoms)[None, :])[:, :, None] | ((torch.any(shift_vecs != 0.0, axis=-1))[None, None, :])
 
-    if atom_mask is not None:
-        triu_mask = triu_mask & atom_mask[:, None, None] & atom_mask[None, :, None]
-    if shift_mask is not None:
-        triu_mask = triu_mask & shift_mask[None, None, :]
+    triu_mask = triu_mask & atom_mask[:, None, None] & atom_mask[None, :, None]
+    triu_mask = triu_mask & shift_mask[None, None, :]
 
     # calculate pairwise distances
     shifted_pos = pos[:, None, :] + shift_vecs[None, :, :]

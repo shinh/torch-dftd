@@ -66,7 +66,7 @@ class DFTD3ModuleStatic(torch.nn.Module):
         pos: Tensor,
         shift_vecs: Tensor,
         cell_volume: float,
-        damping: str = "zero",
+        damping: str,
         atom_mask: Optional[Tensor] = None,
         shift_mask: Optional[Tensor] = None,
     ) -> Tensor:
