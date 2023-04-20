@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 import numpy as np
 import torch
@@ -67,6 +67,8 @@ class DFTD3ModuleStatic(torch.nn.Module):
         shift_vecs: Tensor,
         cell_volume: float,
         damping: str = "zero",
+        atom_mask: Optional[Tensor] = None,
+        shift_mask: Optional[Tensor] = None,
     ) -> Tensor:
         """Forward computation to calculate atomic wise dispersion energy"""
         
@@ -85,5 +87,7 @@ class DFTD3ModuleStatic(torch.nn.Module):
             cnthr=self.cnthr / Bohr,
             cutoff_smoothing=self.cutoff_smoothing,
             damping=damping,
+            atom_mask=atom_mask,
+            shift_mask=shift_mask,
         )
         return [{"energy": E_disp}]
