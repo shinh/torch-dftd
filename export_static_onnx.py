@@ -72,13 +72,15 @@ class ExportONNX(torch.nn.Module):
         )
         self.damping = damping
 
-    def forward(self, Z, pos, shift_vecs, cell_volume):
+    def forward(self, Z, pos, shift_vecs, cell_volume, atom_mask, shift_mask):
         r = self.dftd_module.calc_energy(
             Z,
             pos,
             shift_vecs,
             cell_volume,
             damping=self.damping,
+            atom_mask=atom_mask,
+            shift_mask=shift_mask,
         )
         return r[0]["energy"]
 
@@ -88,6 +90,8 @@ def parse_args():
     parser.add_argument("--repeat", type=str, help="number of repeats inside cell")
     parser.add_argument("--clip_num_atoms", type=int, help="max number of atoms (exceeded atoms are trashed)")
     parser.add_argument("--out_dir", type=str, help="onnx output dir", required=True)
+    parser.add_argument("--pad_num_atoms", type=int, help="num_atoms after padding", required=False)
+    parser.add_argument("--pad_num_cells", type=int, help="num_cells after padding", required=False)
     return parser.parse_args()
 
 def prepare_data(args):
@@ -120,6 +124,23 @@ if __name__ == "__main__":
     shift_vecs = calc_shift_vecs(cell, pbc, cutoff=cutoff)
     shift_vecs = torch.tensor(shift_vecs)
 
+    if args.pad_num_atoms is not None:
+        atom_mask = torch.tensor(np.arange(args.pad_num_atoms) < len(Z))
+        n_pad = args.pad_num_atoms - len(Z)
+        assert n_pad >= 0
+        Z = torch.nn.functional.pad(Z, (0, n_pad), mode="constant")
+        pos = torch.nn.functional.pad(pos, (0, 0, 0, n_pad), mode="constant")
+    else:
+        atom_mask = None
+
+    if args.pad_num_cells is not None:
+        shift_mask = torch.tensor(np.arange(args.pad_num_cells) < len(shift_vecs))
+        n_pad = args.pad_num_cells - len(shift_vecs)
+        assert n_pad >= 0
+        shift_vecs = torch.nn.functional.pad(shift_vecs, (0, 0, 0, n_pad), mode="constant")
+    else:
+        shift_mask = None
+
     print("n_atoms = ", len(Z), "n_cell = ", len(shift_vecs), file=sys.stderr)
     print("atoms = ", atoms, file=sys.stderr)
 
@@ -128,6 +149,8 @@ if __name__ == "__main__":
         "pos": pos.type(torch.float32),
         "shift_vecs": shift_vecs.type(torch.float32),
         "cell_volume": cell_volume,
+        "atom_mask": atom_mask,
+        "shift_mask": shift_mask,
     }
 
     exporter = ExportONNX(cutoff=cutoff, damping="bj")
@@ -142,4 +165,4 @@ if __name__ == "__main__":
 
     print("out_dir = ", out_dir, file=sys.stderr)
     ppe_onnx.export_testcase(exporter, tuple(args.values()), out_dir, verbose=True,
-                             input_names=["Z","pos","shift_vecs","cell_volume"])
+                             input_names=["Z","pos","shift_vecs","cell_volume","atom_mask","shift_mask"])
