@@ -46,6 +46,7 @@ def calc_shift_vecs(cell, pbc, cutoff):
     x, y, z = x[cond], y[cond], z[cond]
 
     mat = np.array([x, y, z]).T
+    mat = np.concatenate(([[0, 0, 0]], mat), axis=0)
     return mat.dot(cell)
 
 class ExportONNX(torch.nn.Module):

@@ -26,11 +26,12 @@ def edisp(  # calculate edisp by all-pair computation
     damping: str = "zero",
 ):
     n_atoms = len(Z)
-    triu_mask = (torch.arange(n_atoms)[:, None] < torch.arange(n_atoms)[None, :])[:, :, None] | ((torch.arange(1+len(shift_vecs)) > 0)[None, None, :])
-    shift_vecs_aug = torch.concat([torch.zeros(1, 3), shift_vecs], axis=0)
+    #assert torch.all(shift_vecs[0] == 0.0)
+    #triu_mask = (torch.arange(n_atoms)[:, None] < torch.arange(n_atoms)[None, :])[:, :, None] | ((torch.arange(len(shift_vecs)) > 0)[None, None, :])
+    triu_mask = (torch.arange(n_atoms)[:, None] < torch.arange(n_atoms)[None, :])[:, :, None] | ((torch.any(shift_vecs != 0.0, axis=-1))[None, None, :])
 
     # calculate pairwise distances
-    shifted_pos = pos[:, None, :] + shift_vecs_aug[None, :, :]
+    shifted_pos = pos[:, None, :] + shift_vecs[None, :, :]
     r2 = torch.sum((pos[:, None, None, :] - shifted_pos[None, :, :, :]) ** 2, axis=-1)
     r = torch.sqrt(r2 + 1e-20)
 
