@@ -9,9 +9,22 @@ from torch import Tensor
 from torch_dftd.functions.dftd3 import d3_autoang, d3_autoev
 from torch_dftd_static.functions.dftd3 import edisp as edisp_triu
 
+
+"""
+Check that c6ab array (shape = (95,95,5,5,3)) has the following structure,
+as assumed in edisp function:
+- c6ab[..., 1] is constant along axis 1 (Z of second atom) and 3,
+  except for Z=0 which does not represent valid atom.
+  Second condition in torch.all(...) below exists because there can be
+  rows/columns without valid values (because not every pair of atoms has full 5x5 table),
+  and such missing values are represented by -1.
+- c6ab[..., 2] is constant along axis 0 (Z of first atom) and 2, except for Z=0.
+
+https://docs.google.com/presentation/d/15J3jDALiD_tDPT9DVi2GcIBTMUT8QlfQe9ET4iuCE0M/edit#slide=id.g226c3535966_0_34
+"""
 def _check_c6ab_structure(c6ab):
-    assert torch.all((c6ab[:, :, :, :, 1] == c6ab[:, :, :, 0:1, 1]) | (c6ab[:, :, :, :, 0] < 0)), "c6ab(1) is not constant along row"
-    assert torch.all((c6ab[:, :, :, :, 2] == c6ab[:, :, 0:1, :, 2]) | (c6ab[:, :, :, :, 0] < 0)), "c6ab(2) is not constant along column"
+    assert torch.all((c6ab[:, 1:, :, :, 1] == c6ab[:, 1:2, :, 0:1, 1]) | (c6ab[:, 1:, :, :, 0] < 0)), "c6ab[..., 1] is not constant along row"
+    assert torch.all((c6ab[1:, :, :, :, 2] == c6ab[1:2, :, 0:1, :, 2]) | (c6ab[1:, :, :, :, 0] < 0)), "c6ab[..., 2] is not constant along column"
 
 class DFTD3ModuleStatic(torch.nn.Module):
     """DFTD3ModuleStatic
