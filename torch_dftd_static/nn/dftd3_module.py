@@ -9,6 +9,10 @@ from torch import Tensor
 from torch_dftd.functions.dftd3 import d3_autoang, d3_autoev
 from torch_dftd_static.functions.dftd3 import edisp as edisp_triu
 
+def _check_c6ab_structure(c6ab):
+    assert torch.all((c6ab[:, :, :, :, 1] == c6ab[:, :, :, 0:1, 1]) | (c6ab[:, :, :, :, 0] < 0)), "c6ab(1) is not constant along row"
+    assert torch.all((c6ab[:, :, :, :, 2] == c6ab[:, :, 0:1, :, 2]) | (c6ab[:, :, :, :, 0] < 0)), "c6ab(2) is not constant along column"
+
 class DFTD3ModuleStatic(torch.nn.Module):
     """DFTD3ModuleStatic
     Args:
@@ -47,6 +51,8 @@ class DFTD3ModuleStatic(torch.nn.Module):
         self.register_buffer("r0ab", r0ab)  # atom pair distance (95, 95)
         self.register_buffer("rcov", rcov)  # atom covalent distance (95)
         self.register_buffer("r2r4", r2r4)  # (95,)
+
+        _check_c6ab_structure(c6ab)
 
         if cnthr > cutoff:
             print(
