@@ -44,10 +44,6 @@ class DFTD3Module(BaseDFTDModule):
         rcov = torch.tensor(d3_params["rcov"], dtype=dtype)
         r2r4 = torch.tensor(d3_params["r2r4"], dtype=dtype)
 
-        # check c6ab parameter structure
-        assert torch.all((c6ab[:, :, :, :, 1] == c6ab[:, :, :, 0:1, 1]) | (c6ab[:, :, :, :, 0] < 0)), "c6ab(1) is not constant along row"
-        assert torch.all((c6ab[:, :, :, :, 2] == c6ab[:, :, 0:1, :, 2]) | (c6ab[:, :, :, :, 0] < 0)), "c6ab(2) is not constant along column"
-
         # (95, 95, 5, 5, 3) c0, c1, c2 for coordination number dependent c6ab term.
         self.register_buffer("c6ab", c6ab)
         self.register_buffer("r0ab", r0ab)  # atom pair distance (95, 95)

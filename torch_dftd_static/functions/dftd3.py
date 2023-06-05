@@ -5,14 +5,12 @@ import torch
 from torch import Tensor
 from torch_dftd.functions.smoothing import poly_smoothing
 
-# conversion factors used in grimme d3 code
-
 from torch_dftd.functions.dftd3 import d3_k1, d3_k3
 
 def edisp(  # calculate edisp by all-pair computation
     Z: Tensor,
     pos: Tensor,  # (n_atoms, 3)
-    shift_vecs: Tensor,  # half of shift vectors (all shift vecs = shift_vecs + -shift_vecs + [(0,0,0)])
+    shift_vecs: Tensor,  # half of shift vectors (eg. shift_vecs = [0, v, 2v] -> ghosts located at [-2v, -v, 0, v, 2v])
     c6ab: Tensor,
     r0ab: Tensor,
     rcov: Tensor,
@@ -31,10 +29,7 @@ def edisp(  # calculate edisp by all-pair computation
     assert shift_mask is not None
 
     n_atoms = len(Z)
-    #assert torch.all(shift_vecs[0] == 0.0)
-    #triu_mask = (torch.arange(n_atoms)[:, None] < torch.arange(n_atoms)[None, :])[:, :, None] | ((torch.arange(len(shift_vecs)) > 0)[None, None, :])
     triu_mask = (torch.arange(n_atoms)[:, None] < torch.arange(n_atoms)[None, :])[:, :, None] | ((torch.any(shift_vecs != 0.0, axis=-1))[None, None, :])
-
     triu_mask = triu_mask & atom_mask[:, None, None] & atom_mask[None, :, None]
     triu_mask = triu_mask & shift_mask[None, None, :]
 
@@ -45,8 +40,8 @@ def edisp(  # calculate edisp by all-pair computation
 
     # calculate coordination numbers (n_atoms,)
     rco = rcov[Z][:, None] + rcov[Z][None, :]  # (n_atoms, n_atoms)
-    rr = rco[:, :, None] / r  # (n_atoms, n_atoms, 1+n_shift)
-    damp = torch.sigmoid(k1 * (rr - 1.0))  # (n_atoms, n_atoms, 1+n_shift)
+    rr = rco[:, :, None] / r  # (n_atoms, n_atoms, n_shift)
+    damp = torch.sigmoid(k1 * (rr - 1.0))  # (n_atoms, n_atoms, n_shift)
     if cnthr is not None and cutoff_smoothing == "poly":
         damp *= poly_smoothing(r, cnthr)
     if cnthr is not None:
@@ -61,11 +56,12 @@ def edisp(  # calculate edisp by all-pair computation
     cn2 = c6ab[1, Z, 0, :, 2]  # (n_atoms, 5)
     k3_rnc_1 = torch.where(cn1 >= 0.0, k3 * (nc[:, None] - cn1) ** 2, torch.tensor(-1.0e20))
     k3_rnc_2 = torch.where(cn2 >= 0.0, k3 * (nc[:, None] - cn2) ** 2, torch.tensor(-1.0e20))
-    r_ratio_1 = torch.softmax(k3_rnc_1, dim=-1).to(torch.float32)
-    r_ratio_2 = torch.softmax(k3_rnc_2, dim=-1).to(torch.float32)
+    r_ratio_1 = torch.softmax(k3_rnc_1, dim=-1)
+    r_ratio_2 = torch.softmax(k3_rnc_2, dim=-1)
     c6 = (cn0 * r_ratio_1[:, None, :, None] * r_ratio_2[None, :, None, :]).sum(dim=(-1,-2))
-    c8 = 3 * c6 * r2r4[Z][:, None] * r2r4[Z][None, :]
-    
+    c8c6_ratio = 3 * r2r4[Z][:, None] * r2r4[Z][None, :]
+    c8 = c6 * c8c6_ratio
+
     # calculate energy
     s6 = params["s6"]
     s8 = params["s18"]
@@ -74,10 +70,9 @@ def edisp(  # calculate edisp by all-pair computation
     if damping in ["bj", "bjm"]:
         a1 = params["rs6"]
         a2 = params["rs18"]
-
         # Becke-Johnson damping, zero-damping introduces spurious repulsion
         # and is therefore not supported/implemented
-        tmp = a1 * torch.sqrt(c8 / c6) + a2
+        tmp = a1 * torch.sqrt(c8c6_ratio) + a2
         tmp2 = tmp ** 2
         tmp6 = tmp2 ** 3
         tmp8 = tmp6 * tmp2
@@ -97,11 +92,4 @@ def edisp(  # calculate edisp by all-pair computation
 
     e68 = torch.where(triu_mask, e68, torch.tensor(0.0))
 
-    return torch.sum(e68.to(torch.float64).sum()) * 2.0
-
-    #e68_same_cell = e68[:, :, 0]
-    #e68_same_cell = torch.where(torch.arange(n_atoms)[:, None] < torch.arange(n_atoms)[None, :], e68_same_cell, torch.tensor(0.0))
-    #e68_diff_cell = e68[:, :, 1:]
-    #e_same_cell = torch.sum(e68_same_cell.to(torch.float64).sum()) * 2.0
-    #e_diff_cell = torch.sum(e68_diff_cell.to(torch.float64).sum()) * 2.0
-    #return e_same_cell + e_diff_cell
+    return e68.to(torch.float64).sum() * 2.0
