@@ -7,12 +7,12 @@ import torch
 from ase.units import Bohr
 from torch import Tensor
 from torch_dftd.functions.dftd3 import d3_autoang, d3_autoev
-from torch_dftd_static.functions.dftd3 import edisp as edisp_triu
+from torch_dftd_static.functions.dftd3 import edisp
 
 
 """
 Check that c6ab array (shape = (95,95,5,5,3)) has the following structure,
-as assumed in edisp function:
+as assumed in the edisp implementation (not in the original torch-dftd).
 - c6ab[..., 1] is constant along axes 1 (Z of second atom) and 3 (cn of second atom),
   except for Z=0 which does not represent valid atom.
   Second condition in torch.all(...) below exists because there can be
@@ -94,7 +94,7 @@ class DFTD3ModuleStatic(torch.nn.Module):
         
         # TODO: add interface for force and stress
         
-        E_disp = d3_autoev * edisp_triu(
+        E_disp = d3_autoev * edisp(
             Z,
             pos = pos / d3_autoang,
             shift_vecs = shift_vecs / d3_autoang,
