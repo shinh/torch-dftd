@@ -84,20 +84,32 @@ class DFTD3ModuleStatic(torch.nn.Module):
         self,
         Z: Tensor,
         pos: Tensor,
-        shift_vecs: Tensor,
-        cell_volume: float,
+        shift_int: Tensor,
+        needs_both_ij_ji: Tensor,
+        n_shifts: Tensor,
+        cell: Tensor,
         damping: str,
         atom_mask: Optional[Tensor] = None,
         shift_mask: Optional[Tensor] = None,
     ) -> Tensor:
-        """Forward computation to calculate atomic wise dispersion energy"""
+        """Forward computation to calculate dispersion energy"""
         
-        # TODO: add interface for force and stress
-        
+        # TODO(mwata): treat pbc != [1, 1, 1] case appropriately
+        # TODO(mwata): resurrect cell_volume (needed for calculating stress)
+
+        # TODO(mwata)
+        # Temporary workaround. To obtain correct value of `stress` we need to
+        # backprop through cell_inv to cell, so gradient should not be detached here.
+        cell_inv = torch.tensor(np.linalg.inv(cell.detach().numpy()))
+
         E_disp = d3_autoev * edisp(
             Z,
             pos = pos / d3_autoang,
-            shift_vecs = shift_vecs / d3_autoang,
+            shift_int = shift_int,
+            needs_both_ij_ji = needs_both_ij_ji,
+            cell = cell / d3_autoang,
+            cell_inv = cell_inv * d3_autoang,  # cell_inv has dimension of [length^-1], so we need *d3_autoang instead of /d3_autoang
+            n_shifts = n_shifts,
             c6ab=self.c6ab,
             r0ab=self.r0ab,
             rcov=self.rcov,

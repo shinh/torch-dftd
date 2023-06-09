@@ -15,7 +15,7 @@ import pytorch_pfn_extras.onnx as ppe_onnx
 from torch_dftd_static.nn.dftd3_module import DFTD3ModuleStatic
 from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
 
-def cell_width(cell):
+def _cell_width(cell):
     xn = np.cross(cell[1, :], cell[2, :])
     yn = np.cross(cell[2, :], cell[0, :])
     zn = np.cross(cell[0, :], cell[1, :])
@@ -29,25 +29,31 @@ def cell_width(cell):
 
     return np.array([cell_dx, cell_dy, cell_dz])
 
-def calc_shift_vecs(cell, pbc, cutoff):
-    w = cell_width(cell)
-    n_shifts = np.ceil(cutoff / w)
-    n_shifts = np.where(pbc, n_shifts, 0)
+def _calc_shift_int(cell, pbc, cutoff):
+    w = _cell_width(cell)
+    eps = 1e-6
+    n_shifts = np.ceil(2 * cutoff / w + eps)
+    n_shifts = np.where(pbc, n_shifts, 1)
 
     x, y, z = np.meshgrid(
-                np.arange(-n_shifts[0], n_shifts[0] + 1),
-                np.arange(-n_shifts[1], n_shifts[1] + 1),
-                np.arange(-n_shifts[2], n_shifts[2] + 1),
+                np.arange(n_shifts[0]),
+                np.arange(n_shifts[1]),
+                np.arange(n_shifts[2]),
                 indexing="ij")
     x, y, z = x.flatten(), y.flatten(), z.flatten()
-    
-    # take triu part only
-    cond = (x > 0) | ((x == 0) & (y > 0)) | ((x == 0) & (y == 0) & (z > 0))
-    x, y, z = x[cond], y[cond], z[cond]
+    shift_int = np.array([x, y, z]).T
 
-    mat = np.array([x, y, z]).T
-    mat = np.concatenate(([[0, 0, 0]], mat), axis=0)
-    return mat.dot(cell)
+    # only half of shift_int are needed
+    neg_shift_int = (-shift_int) % n_shifts
+    needed = (shift_int[:, 0] < neg_shift_int[:, 0]) | \
+        ((shift_int[:, 0] == neg_shift_int[:, 0]) & (shift_int[:, 1] < neg_shift_int[:, 1])) | \
+        ((shift_int[:, 0] == neg_shift_int[:, 0]) & (shift_int[:, 1] == neg_shift_int[:, 1]) & (shift_int[:, 2] <= neg_shift_int[:, 2]))
+    shift_int = shift_int[needed]
+    needs_both_ij_ji = np.any(shift_int != (neg_shift_int[needed]), axis=-1)
+
+    # shift_int = np.where(shift_int > n_shifts // 2, shift_int - n_shifts, shift_int)
+
+    return torch.tensor(shift_int), torch.tensor(needs_both_ij_ji), torch.tensor(n_shifts)
 
 class ExportONNX(torch.nn.Module):
     def __init__(
@@ -72,12 +78,14 @@ class ExportONNX(torch.nn.Module):
         )
         self.damping = damping
 
-    def forward(self, Z, pos, shift_vecs, cell_volume, atom_mask, shift_mask):
+    def forward(self, Z, pos, shift_int, needs_both_ij_ji, n_shifts, cell, atom_mask, shift_mask):
         r = self.dftd_module.calc_energy(
-            Z,
-            pos,
-            shift_vecs,
-            cell_volume,
+            Z=Z,
+            pos=pos,
+            shift_int=shift_int,
+            needs_both_ij_ji=needs_both_ij_ji,
+            n_shifts=n_shifts,
+            cell=cell,
             damping=self.damping,
             atom_mask=atom_mask,
             shift_mask=shift_mask,
@@ -120,11 +128,8 @@ if __name__ == "__main__":
         cell = np.array(atoms.get_cell())
     else:
         cell = np.eye(3)
-    cell_volume = np.abs(np.linalg.det(cell))
-    cell_volume = torch.tensor(cell_volume)
 
-    shift_vecs = calc_shift_vecs(cell, pbc, cutoff=cutoff)
-    shift_vecs = torch.tensor(shift_vecs)
+    shift_int, needs_both_ij_ji, n_shifts = _calc_shift_int(cell, pbc, cutoff=cutoff)
 
     if args.pad_num_atoms is not None:
         atom_mask = torch.tensor(np.arange(args.pad_num_atoms) < len(Z))
@@ -136,21 +141,27 @@ if __name__ == "__main__":
         atom_mask = torch.ones(len(Z), dtype=bool)
 
     if args.pad_num_cells is not None:
-        shift_mask = torch.tensor(np.arange(args.pad_num_cells) < len(shift_vecs))
-        n_pad = args.pad_num_cells - len(shift_vecs)
+        shift_mask = torch.tensor(np.arange(args.pad_num_cells) < len(shift_int))
+        n_pad = args.pad_num_cells - len(shift_int)
         assert n_pad >= 0
-        shift_vecs = torch.nn.functional.pad(shift_vecs, (0, 0, 0, n_pad), mode="constant")
+        shift_int = torch.nn.functional.pad(shift_int, (0, 0, 0, n_pad), mode="constant")
     else:
-        shift_mask = torch.ones(len(shift_vecs), dtype=bool)
+        shift_mask = torch.ones(len(shift_int), dtype=bool)
 
-    print("n_atoms = ", len(Z), "n_cell = ", len(shift_vecs), file=sys.stderr)
+    #print(n_shifts)
+    #print(shift_int)
+    #print(needs_both_ij_ji)
+
+    print("n_atoms = ", len(Z), "n_cell = ", len(shift_int), file=sys.stderr)
     print("atoms = ", atoms, file=sys.stderr)
 
     inputs = {
         "Z": Z,
         "pos": pos.type(torch.float64),
-        "shift_vecs": shift_vecs.type(torch.float64),
-        "cell_volume": cell_volume,
+        "shift_int": shift_int.type(torch.float64),
+        "needs_both_ij_ji": needs_both_ij_ji,
+        "n_shifts": n_shifts,
+        "cell": torch.tensor(cell).to(torch.float64),
         "atom_mask": atom_mask,
         "shift_mask": shift_mask,
     }
@@ -167,7 +178,7 @@ if __name__ == "__main__":
 
     print("out_dir = ", out_dir, file=sys.stderr)
     ppe_onnx.export_testcase(exporter, tuple(inputs.values()), out_dir, verbose=True,
-                             input_names=["Z","pos","shift_vecs","cell_volume","atom_mask","shift_mask"])
+                             input_names=["Z","pos","shift_int","needs_both_ij_ji","n_shifts","cell","atom_mask","shift_mask"])
 
     if args.compare_with is not None:
         from codegen.utils import codegen_tempfile, storage

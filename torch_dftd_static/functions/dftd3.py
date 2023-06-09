@@ -7,10 +7,17 @@ from torch_dftd.functions.smoothing import poly_smoothing
 
 from torch_dftd.functions.dftd3 import d3_k1, d3_k3
 
+def _mod(a: Tensor, b: Tensor):  # abs(_mod(a, b)) <= b/2
+    return a - torch.round(a / b) * b
+
 def edisp(  # calculate edisp by all-pair computation
     Z: Tensor,
     pos: Tensor,  # (n_atoms, 3)
-    shift_vecs: Tensor,  # half of shift vectors (eg. shift_vecs = [0, v, 2v] -> ghosts located at [-2v, -v, 0, v, 2v])
+    shift_int: Tensor,
+    needs_both_ij_ji: Tensor,
+    cell: Tensor,
+    cell_inv: Tensor,
+    n_shifts: Tensor,
     c6ab: Tensor,
     r0ab: Tensor,
     rcov: Tensor,
@@ -29,13 +36,17 @@ def edisp(  # calculate edisp by all-pair computation
     assert shift_mask is not None
 
     n_atoms = len(Z)
-    triu_mask = (torch.arange(n_atoms)[:, None] < torch.arange(n_atoms)[None, :])[:, :, None] | ((torch.any(shift_vecs != 0.0, axis=-1))[None, None, :])
+    triu_mask = (torch.arange(n_atoms)[:, None] < torch.arange(n_atoms)[None, :])[:, :, None] | needs_both_ij_ji[None, None, :]
     triu_mask = triu_mask & atom_mask[:, None, None] & atom_mask[None, :, None]
     triu_mask = triu_mask & shift_mask[None, None, :]
 
     # calculate pairwise distances
-    shifted_pos = pos[:, None, :] + shift_vecs[None, :, :]
-    r2 = torch.sum((pos[:, None, None, :] - shifted_pos[None, :, :, :]) ** 2, axis=-1)
+    cell_coordinate = pos @ cell_inv
+    shifted_cell_coordinate = cell_coordinate[:, None, :] + shift_int[None, :, :]
+    v_atom_ghost_cell_coordinate = cell_coordinate[:, None, None, :] - shifted_cell_coordinate[None, :, :, :]
+    v_atom_ghost_cell_coordinate = _mod(v_atom_ghost_cell_coordinate, n_shifts)
+    v_atom_ghost = v_atom_ghost_cell_coordinate @ cell
+    r2 = torch.sum(v_atom_ghost ** 2, axis=-1)
     r = torch.sqrt(r2 + 1e-20)
 
     # calculate coordination numbers (n_atoms,)
