@@ -8,7 +8,7 @@ from torch_dftd.functions.smoothing import poly_smoothing
 from torch_dftd.functions.dftd3 import d3_k1, d3_k3
 
 def _mod(a: Tensor, b: Tensor):  # abs(_mod(a, b)) <= b/2
-    return a - torch.round(a / b) * b
+    return a - torch.floor(a / b + 0.5) * b
 
 def edisp(  # calculate edisp by all-pair computation
     Z: Tensor,
