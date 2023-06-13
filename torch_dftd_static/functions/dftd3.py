@@ -12,7 +12,7 @@ def _mod(a: Tensor, b: Tensor):  # abs(_mod(a, b)) <= b/2
 
 def _small_matmul(x: Tensor, mat: Tensor):  # compute x @ mat for small mat
     assert x.size(-1) == mat.size(0), f"wrong shape for matmul: {x.shape} * {mat.shape}"
-    x_sliced = [x[..., j] for j in range(x.size(-1))]
+    x_sliced = [s.squeeze(-1) for s in torch.split(x, 1, dim=-1)]
     y_sliced = [torch.zeros(x.shape[:-1], dtype=x.dtype) for _ in range(x.size(-1))]
     for k in range(mat.size(0)):
         for j in range(mat.size(1)):
