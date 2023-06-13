@@ -10,6 +10,16 @@ from torch_dftd.functions.dftd3 import d3_k1, d3_k3
 def _mod(a: Tensor, b: Tensor):  # abs(_mod(a, b)) <= b/2
     return a - torch.floor(a / b + 0.5) * b
 
+def _small_matmul(x: Tensor, mat: Tensor):  # compute x @ mat for small mat
+    assert x.size(-1) == mat.size(0), f"wrong shape for matmul: {x.shape} * {mat.shape}"
+    x_sliced = [x[..., j] for j in range(x.size(-1))]
+    y_sliced = [torch.zeros(x.shape[:-1], dtype=x.dtype) for _ in range(x.size(-1))]
+    for k in range(mat.size(0)):
+        for j in range(mat.size(1)):
+            y_sliced[j] = y_sliced[j] + x_sliced[k] * mat[k, j]
+    y = torch.stack(y_sliced, dim=-1)
+    return y
+
 def edisp(  # calculate edisp by all-pair computation
     Z: Tensor,
     pos: Tensor,  # (n_atoms, 3)
@@ -41,11 +51,11 @@ def edisp(  # calculate edisp by all-pair computation
     triu_mask = triu_mask & shift_mask[None, None, :]
 
     # calculate pairwise distances
-    cell_coordinate = pos @ cell_inv
+    cell_coordinate = _small_matmul(pos, cell_inv)
     shifted_cell_coordinate = cell_coordinate[:, None, :] + shift_int[None, :, :]
     v_atom_ghost_cell_coordinate = cell_coordinate[:, None, None, :] - shifted_cell_coordinate[None, :, :, :]
     v_atom_ghost_cell_coordinate = _mod(v_atom_ghost_cell_coordinate, n_shifts)
-    v_atom_ghost = v_atom_ghost_cell_coordinate @ cell
+    v_atom_ghost = _small_matmul(v_atom_ghost_cell_coordinate, cell)
     r2 = torch.sum(v_atom_ghost ** 2, axis=-1)
     r = torch.sqrt(r2 + 1e-20)
 
