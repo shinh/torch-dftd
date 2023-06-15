@@ -100,7 +100,7 @@ class DFTD3ModuleStatic(torch.nn.Module):
         # TODO(mwata)
         # Temporary workaround. To obtain correct value of `stress` we need to
         # backprop through cell_inv to cell, so gradient should not be detached here.
-        cell_inv = torch.tensor(np.linalg.inv(cell.detach().numpy()))
+        cell_inv = torch.tensor(np.linalg.inv(cell.cpu().detach().numpy()))
 
         E_disp = d3_autoev * edisp(
             Z,
